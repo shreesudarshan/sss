@@ -1,3 +1,5 @@
+"""Legacy database workflow tests kept for reference."""
+
 import pytest
 import asyncio
 from sqlalchemy.ext.asyncio import AsyncSession

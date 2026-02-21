@@ -1,3 +1,5 @@
+"""Legacy Bloom filter test snippets."""
+
 # tests BloomFilter.add(), check(), serialize()
 def test_bloom_add_check(bloom_filter):
     bloom_filter.add("token123")

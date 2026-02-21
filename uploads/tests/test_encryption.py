@@ -1,3 +1,5 @@
+"""Legacy encryption unit tests for service behavior."""
+
 import pytest
 import json
 from app.encryption import EncryptionService

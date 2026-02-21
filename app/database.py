@@ -1,95 +1,176 @@
-import asyncio
-import sqlalchemy
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
-from sqlalchemy import Column, Integer, String, ForeignKey, Index, text
-from sqlalchemy.orm import declarative_base, relationship
-from sqlalchemy.sql import func
-from typing import List, Optional
-from app import logger
-import os
+"""Database models and async session management.
 
-Base = declarative_base()
+This module defines all persistent tables and provides shared helpers:
+- `init_db` to create tables at startup
+- `get_session` to inject SQLAlchemy async sessions into routes
+"""
+
+from collections.abc import AsyncGenerator
+from datetime import UTC, datetime
+
+from fastapi import HTTPException, status
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+
+from app import logger
+from app.settings import get_settings
+
+
+class Base(DeclarativeBase):
+    """Base declarative model class used by all ORM tables."""
+
+    pass
+
+
+class User(Base):
+    """Registered user account."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    email: Mapped[str] = mapped_column(String(255), unique=True, nullable=False, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
+    )
+
+    sessions: Mapped[list["Session"]] = relationship(
+        back_populates="user", cascade="all, delete-orphan"
+    )
+    patients: Mapped[list["Patient"]] = relationship(
+        back_populates="owner", cascade="all, delete-orphan"
+    )
+
+
+class Session(Base):
+    """Persisted login session for logout/revocation support."""
+
+    __tablename__ = "sessions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    session_token_hash: Mapped[str] = mapped_column(
+        String(128), unique=True, nullable=False, index=True
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    user: Mapped[User] = relationship(back_populates="sessions")
+
 
 class Patient(Base):
+    """Encrypted patient record owned by one user."""
+
     __tablename__ = "patients"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    ciphertext = Column(String, nullable=False)
-    iv = Column(String, nullable=False)
-    tag = Column(String, nullable=False)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    owner_user_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    ciphertext: Mapped[str] = mapped_column(Text, nullable=False)
+    iv: Mapped[str] = mapped_column(String(255), nullable=False)
+    tag: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), nullable=False
+    )
+
+    owner: Mapped[User] = relationship(back_populates="patients")
+    tokens: Mapped[list["SearchToken"]] = relationship(
+        back_populates="patient", cascade="all, delete-orphan"
+    )
+
 
 class SearchToken(Base):
+    """Blind-index token row used for patient search."""
+
     __tablename__ = "search_tokens"
-    
-    id = Column(Integer, primary_key=True, index=True)
-    patient_id = Column(Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False)
-    token = Column(String, nullable=False, index=True)
-    
-    patient = relationship("Patient", back_populates="tokens")
 
-Patient.tokens = relationship("SearchToken", cascade="all, delete-orphan")
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    patient_id: Mapped[int] = mapped_column(
+        Integer, ForeignKey("patients.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
 
-DATABASE_URL = "sqlite+aiosqlite:///secure.db"
-engine = create_async_engine(DATABASE_URL, echo=False)
+    patient: Mapped[Patient] = relationship(back_populates="tokens")
+
+
+Index("idx_search_tokens_token", SearchToken.token)
+Index("idx_sessions_user_expires", Session.user_id, Session.expires_at)
+
+settings = get_settings()
+engine = create_async_engine(settings.database_url, echo=False, pool_pre_ping=True)
 AsyncSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
+_db_ready = False
+_db_error: str | None = None
+
+
+def _format_db_error(exc: Exception) -> str:
+    """Normalize DB connection/setup failures into one actionable message."""
+    error_text = str(exc).lower()
+    if "password authentication failed" in error_text or "invalidpassworderror" in error_text:
+        return (
+            "Database authentication failed. Update DATABASE_URL in .env with the correct "
+            "PostgreSQL username/password."
+        )
+    if "connection refused" in error_text or "could not connect" in error_text:
+        return (
+            "Database connection failed. Ensure PostgreSQL is running and DATABASE_URL points "
+            "to the correct host/port."
+        )
+    return "Database initialization failed. Verify DATABASE_URL and PostgreSQL availability."
+
+
+def get_database_status() -> tuple[bool, str | None]:
+    """Expose database readiness and last known error for health checks."""
+    return _db_ready, _db_error
+
+
 async def init_db() -> None:
-    """Initialize database and create tables."""
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Create indexes for performance
-        await conn.execute(text("CREATE INDEX IF NOT EXISTS idx_tokens_token ON search_tokens(token)"))
+    """Create tables and indexes if they do not already exist."""
+    global _db_ready, _db_error
+    try:
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        _db_ready = True
+        _db_error = None
         logger.info("Database initialized")
+    except Exception as exc:
+        _db_ready = False
+        _db_error = _format_db_error(exc)
+        logger.error(_db_error)
 
-async def get_session() -> AsyncSession:
-    """Get database session."""
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    """Yield one async DB session per request."""
+    global _db_ready, _db_error
+    if not _db_ready and _db_error:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=_db_error)
+
     async with AsyncSessionLocal() as session:
+        try:
+            # Fail fast with a friendly error if DB becomes unavailable.
+            await session.execute(text("SELECT 1"))
+        except SQLAlchemyError as exc:
+            _db_ready = False
+            _db_error = _format_db_error(exc)
+            logger.error(_db_error)
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=_db_error,
+            ) from exc
         yield session
-
-async def insert_patient(
-    session: AsyncSession,
-    ciphertext: str,
-    iv: str,
-    tag: str,
-    tokens: List[str]
-) -> int:
-    """Insert patient record and search tokens."""
-    async with session.begin():
-        patient = Patient(ciphertext=ciphertext, iv=iv, tag=tag)
-        session.add(patient)
-        await session.flush()
-        
-        for token in tokens:
-            search_token = SearchToken(patient_id=patient.id, token=token)
-            session.add(search_token)
-        
-        await session.flush()
-        patient_id = patient.id
-        await session.commit()
-        return patient_id
-
-async def search_patients(
-    session: AsyncSession,
-    tokens: List[str]
-) -> List[int]:
-    """Search patients by HMAC tokens."""
-    if not tokens:
-        return []
-    
-    token_list = "'" + "', '".join(tokens) + "'"
-    result = await session.execute(
-        text(f"""
-            SELECT DISTINCT patient_id 
-            FROM search_tokens 
-            WHERE token IN ({token_list})
-        """)
-    )
-    return [row[0] for row in result.fetchall()]
-
-async def get_patient(
-    session: AsyncSession,
-    patient_id: int
-) -> Optional[Patient]:
-    """Fetch patient by ID."""
-    result = await session.get(Patient, patient_id)
-    return result

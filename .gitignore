@@ -1,0 +1,13 @@
+# Python virtual environment and cache.
+venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# Frontend generated files.
+sss frontend/node_modules/
+sss frontend/dist/
+
+# Local environment secrets.
+#.env
+#.ENV

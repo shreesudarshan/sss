@@ -1,42 +1,185 @@
-#root {
-  max-width: 1280px;
+/*
+  Component-level styling for the authenticated app UI.
+  Includes layout, forms, responsive behavior, and state colors.
+*/
+
+:root {
+  --bg: radial-gradient(circle at 15% 20%, #ffe6c9 0%, #f4efe7 45%, #d7e4f2 100%);
+  --surface: rgba(255, 255, 255, 0.85);
+  --surface-strong: #ffffff;
+  --text: #1a1e2a;
+  --muted: #4d5b6e;
+  --line: #cfd8e4;
+  --primary: #0b7285;
+  --primary-strong: #075968;
+  --danger: #b42318;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+.page {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  padding: 2rem 1rem 3rem;
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  padding: 1.25rem;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 14px 24px rgba(14, 31, 53, 0.08);
+}
+
+.auth-panel {
+  max-width: 430px;
+  margin: 3rem auto;
+}
+
+.header-panel {
+  max-width: 1100px;
+  margin: 0 auto 1.2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 1rem;
+}
+
+.grid {
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 2rem;
-  text-align: center;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1rem;
 }
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: filter 300ms;
-}
-.logo:hover {
-  filter: drop-shadow(0 0 2em #646cffaa);
-}
-.logo.react:hover {
-  filter: drop-shadow(0 0 2em #61dafbaa);
+h1,
+h2 {
+  margin: 0;
+  letter-spacing: 0.02em;
 }
 
-@keyframes logo-spin {
-  from {
-    transform: rotate(0deg);
+h1 {
+  font-size: clamp(1.4rem, 3vw, 2rem);
+}
+
+h2 {
+  margin-bottom: 0.9rem;
+}
+
+.subtitle {
+  margin-top: 0.35rem;
+  color: var(--muted);
+}
+
+.tabs {
+  display: inline-flex;
+  gap: 0.4rem;
+  margin-top: 0.85rem;
+}
+
+.tab {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  border-radius: 999px;
+  padding: 0.35rem 0.9rem;
+  cursor: pointer;
+}
+
+.tab.active {
+  background: var(--primary);
+  color: #fff;
+  border-color: var(--primary);
+}
+
+.form {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 1rem;
+}
+
+label {
+  display: grid;
+  gap: 0.3rem;
+  font-size: 0.93rem;
+}
+
+input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.62rem 0.7rem;
+  color: var(--text);
+  background: var(--surface-strong);
+}
+
+button {
+  border: none;
+  border-radius: 10px;
+  padding: 0.6rem 0.95rem;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.primary:hover {
+  background: var(--primary-strong);
+}
+
+.danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.inline-form {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.6rem;
+}
+
+.results {
+  list-style: none;
+  margin: 1rem 0 0;
+  padding: 0;
+  display: grid;
+  gap: 0.5rem;
+}
+
+.results li {
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 0.65rem;
+  display: grid;
+  gap: 0.12rem;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.status {
+  margin-top: 0.75rem;
+  color: var(--primary-strong);
+}
+
+.error {
+  color: var(--danger);
+  margin: 0;
+}
+
+@media (max-width: 700px) {
+  .header-panel {
+    align-items: flex-start;
+    flex-direction: column;
   }
-  to {
-    transform: rotate(360deg);
+
+  .inline-form {
+    grid-template-columns: 1fr;
   }
-}
-
-@media (prefers-reduced-motion: no-preference) {
-  a:nth-of-type(2) .logo {
-    animation: logo-spin infinite 20s linear;
-  }
-}
-
-.card {
-  padding: 2em;
-}
-
-.read-the-docs {
-  color: #888;
 }

@@ -1,30 +1,55 @@
+"""FastAPI application entrypoint.
+
+Startup behavior:
+- read settings
+- initialize database tables
+- register auth and patient routers
+"""
+
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
-import logging
+from fastapi.middleware.cors import CORSMiddleware
 
-# Simple standalone logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+from app import logger
+from app.auth_routes import router as auth_router
+from app.database import get_database_status, init_db
+from app.routes import router as patient_router
+from app.settings import get_settings
 
-app = FastAPI(title="Secure Bloom SSE")
+settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    """Initialize persistent storage before serving traffic."""
+    await init_db()
+    logger.info("Application startup complete")
+    yield
+
+
+app = FastAPI(title="Secure Bloom SSE", lifespan=lifespan)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 @app.get("/")
-async def root():
-    logger.info("SSE Server LIVE!")
-    return {"message": "🚀 Secure Bloom SSE Working!"}
+async def root() -> dict[str, str]:
+    """Simple liveness endpoint."""
+    return {"message": "Secure Bloom SSE API is running"}
+
 
 @app.get("/health")
-async def health():
-    return {"status": "healthy", "ready": True}
+async def health() -> dict[str, bool | str | None]:
+    """Health endpoint for checks and monitoring."""
+    db_ready, db_error = get_database_status()
+    return {"status": db_ready, "database_ready": db_ready, "database_error": db_error}
 
-@app.post("/patients")
-async def create_patient():
-    return {"patient_id": 1, "status": "would be encrypted"}
 
-@app.get("/patients/search")
-async def search(q: str = "test"):
-    return [{"id": 1, "name": "John Doe (demo)"}]
-
-@app.get("/patients/{id}")
-async def get_patient(id: int):
-    return {"id": id, "name": "John Doe", "status": "decrypted"}
+app.include_router(auth_router)
+app.include_router(patient_router)
